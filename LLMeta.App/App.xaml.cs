@@ -63,6 +63,20 @@ public partial class App : System.Windows.Application
             var settingsStore = new SettingsStore(logger);
             var settings = settingsStore.Load();
             var mainViewModel = new MainViewModel(settings, settingsStore, logger);
+            mainViewModel.OpenXrReinitializeRequested += () =>
+            {
+                var reinitializeState = ReinitializeOpenXr(logger);
+                mainViewModel.UpdateOpenXrControllerState(reinitializeState);
+                if (reinitializeState.IsInitialized)
+                {
+                    mainViewModel.StatusMessage =
+                        "OpenXR reinitialized. Disable keyboard debug input to use real device.";
+                }
+                else
+                {
+                    mainViewModel.StatusMessage = "OpenXR reinitialize failed.";
+                }
+            };
 
             _androidInputBridgeTcpServerService = new AndroidInputBridgeTcpServerService(
                 logger,
@@ -72,24 +86,8 @@ public partial class App : System.Windows.Application
             mainViewModel.BridgeStatus =
                 _androidInputBridgeTcpServerService.StatusText + " (A-1: Android -> 10.0.2.2)";
 
-            var openXrControllerInputService = new OpenXrControllerInputService();
-            var initializeState = openXrControllerInputService.Initialize();
+            var initializeState = ReinitializeOpenXr(logger);
             mainViewModel.UpdateOpenXrControllerState(initializeState);
-            logger.Info($"OpenXR input initialize: {initializeState.Status}");
-
-            if (initializeState.IsInitialized)
-            {
-                _openXrControllerInputService = openXrControllerInputService;
-            }
-            else
-            {
-                openXrControllerInputService.Dispose();
-            }
-
-            if (!initializeState.IsInitialized)
-            {
-                mainViewModel.IsKeyboardDebugMode = true;
-            }
 
             MainWindow = new MainWindow { DataContext = mainViewModel };
             MainWindow.PreviewKeyDown += (_, args) =>
@@ -117,16 +115,19 @@ public partial class App : System.Windows.Application
                     if (mainViewModel.IsKeyboardDebugMode)
                     {
                         state = _keyboardInputEmulatorService.BuildState();
+                        mainViewModel.ActiveInputSource = "Input source: Keyboard debug";
                     }
                     else if (_openXrControllerInputService is not null)
                     {
                         state = _openXrControllerInputService.Poll();
+                        mainViewModel.ActiveInputSource = "Input source: OpenXR";
                     }
                     else
                     {
                         state = _keyboardInputEmulatorService.BuildUnavailableState(
-                            "OpenXR is not initialized. Enable keyboard debug input."
+                            "OpenXR is not initialized. Click Reinitialize OpenXR or enable keyboard debug input."
                         );
+                        mainViewModel.ActiveInputSource = "Input source: unavailable";
                     }
 
                     mainViewModel.UpdateOpenXrControllerState(state);
@@ -169,5 +170,26 @@ public partial class App : System.Windows.Application
         _androidInputBridgeTcpServerService?.Dispose();
         _androidInputBridgeTcpServerService = null;
         base.OnExit(e);
+    }
+
+    private OpenXrControllerState ReinitializeOpenXr(AppLogger logger)
+    {
+        _openXrControllerInputService?.Dispose();
+        _openXrControllerInputService = null;
+
+        var openXrControllerInputService = new OpenXrControllerInputService();
+        var initializeState = openXrControllerInputService.Initialize();
+        logger.Info($"OpenXR input initialize: {initializeState.Status}");
+
+        if (initializeState.IsInitialized)
+        {
+            _openXrControllerInputService = openXrControllerInputService;
+        }
+        else
+        {
+            openXrControllerInputService.Dispose();
+        }
+
+        return initializeState;
     }
 }

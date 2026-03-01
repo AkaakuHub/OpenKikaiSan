@@ -1,3 +1,4 @@
+using System;
 using System.Windows.Input;
 using LLMeta.App.Models;
 using LLMeta.App.Stores;
@@ -17,6 +18,7 @@ public sealed class MainViewModel : ViewModelBase
     private string _openXrInputStatus = "OpenXR input: not initialized";
     private string _bridgeStatus = "Bridge: not started";
     private bool _isKeyboardDebugMode;
+    private string _activeInputSource = "Input source: not selected";
     private string _hmdPoseState = "HMD: -";
     private string _leftControllerState = "Left: -";
     private string _rightControllerState = "Right: -";
@@ -29,6 +31,7 @@ public sealed class MainViewModel : ViewModelBase
         _sampleText = settings.SampleText;
 
         SaveSettingsCommand = new RelayCommand(_ => SaveSettings());
+        ReinitializeOpenXrCommand = new RelayCommand(_ => RequestReinitializeOpenXr());
     }
 
     public string StatusMessage
@@ -74,11 +77,20 @@ public sealed class MainViewModel : ViewModelBase
     }
 
     public ICommand SaveSettingsCommand { get; }
+    public ICommand ReinitializeOpenXrCommand { get; }
+
+    public event Action? OpenXrReinitializeRequested;
 
     public string BridgeStatus
     {
         get => _bridgeStatus;
         set => SetProperty(ref _bridgeStatus, value);
+    }
+
+    public string ActiveInputSource
+    {
+        get => _activeInputSource;
+        set => SetProperty(ref _activeInputSource, value);
     }
 
     public void UpdateOpenXrControllerState(OpenXrControllerState state)
@@ -106,5 +118,10 @@ public sealed class MainViewModel : ViewModelBase
     private static string ToOnOff(bool value)
     {
         return value ? "ON" : "OFF";
+    }
+
+    private void RequestReinitializeOpenXr()
+    {
+        OpenXrReinitializeRequested?.Invoke();
     }
 }

@@ -24,38 +24,45 @@
       Margin="0,0,0,16"
     />
 
-    <StackPanel Grid.Row="1" Margin="0,0,0,16">
-      <TextBlock Text="Sample Text:" FontWeight="SemiBold" Margin="0,0,0,4" />
-      <TextBox
-        Text="{Binding SampleText, UpdateSourceTrigger=PropertyChanged}"
-        Height="32"
-        Padding="4"
-      />
+    <ScrollViewer
+      Grid.Row="1"
+      VerticalScrollBarVisibility="Auto"
+      HorizontalScrollBarVisibility="Disabled"
+      Margin="0,0,0,16"
+    >
+      <StackPanel>
+        <TextBlock Text="Settings:" FontWeight="SemiBold" Margin="0,0,0,8" />
+        <TextBlock Text="OpenXR input monitor mode" Foreground="Gray" Margin="0,0,0,4" />
+        <CheckBox
+          Content="Enable keyboard debug input"
+          IsChecked="{Binding IsKeyboardDebugMode}"
+          Margin="0,0,0,8"
+        />
+        <Button
+          Content="Reinitialize OpenXR"
+          Width="180"
+          Command="{Binding ReinitializeOpenXrCommand}"
+          Margin="0,0,0,8"
+        />
+        <TextBlock
+          Foreground="Gray"
+          TextWrapping="Wrap"
+          Text="Left stick: WASD | Right stick: IJKL | Buttons: 1(X) 2(Y) 3(A) 4(B) | Trigger/Grip: Q E U O | Stick click: LeftShift RightShift | HMD yaw/pitch/roll: Arrow + PageUp/PageDown | HMD position: F/H(X) T/G(Y) R/V(Z)"
+        />
 
-      <TextBlock Text="Settings:" FontWeight="SemiBold" Margin="0,16,0,8" />
-      <TextBlock Text="OpenXR input monitor mode" Foreground="Gray" Margin="0,0,0,4" />
-      <CheckBox
-        Content="Enable keyboard debug input"
-        IsChecked="{Binding IsKeyboardDebugMode}"
-        Margin="0,0,0,8"
-      />
-      <TextBlock
-        Foreground="Gray"
-        TextWrapping="Wrap"
-        Text="Left stick: WASD | Right stick: IJKL | Buttons: 1(X) 2(Y) 3(A) 4(B) | Trigger/Grip: Q E U O | Stick click: LeftShift RightShift | HMD yaw/pitch/roll: Arrow + PageUp/PageDown | HMD position: F/H(X) T/G(Y) R/V(Z)"
-      />
-
-      <TextBlock Text="OpenXR Controller Input:" FontWeight="SemiBold" Margin="0,16,0,8" />
-      <Border BorderBrush="#DDDDDD" BorderThickness="1" Padding="8">
-        <StackPanel>
-          <TextBlock Text="{Binding OpenXrInputStatus}" Margin="0,0,0,8" />
-          <TextBlock Text="{Binding BridgeStatus}" Margin="0,0,0,8" />
-          <TextBlock Text="{Binding HmdPoseState}" TextWrapping="Wrap" Margin="0,0,0,8" />
-          <TextBlock Text="{Binding LeftControllerState}" Margin="0,0,0,4" />
-          <TextBlock Text="{Binding RightControllerState}" TextWrapping="Wrap" />
-        </StackPanel>
-      </Border>
-    </StackPanel>
+        <TextBlock Text="OpenXR Controller Input:" FontWeight="SemiBold" Margin="0,16,0,8" />
+        <Border BorderBrush="#DDDDDD" BorderThickness="1" Padding="8">
+          <StackPanel>
+            <TextBlock Text="{Binding OpenXrInputStatus}" Margin="0,0,0,8" />
+            <TextBlock Text="{Binding ActiveInputSource}" Margin="0,0,0,8" />
+            <TextBlock Text="{Binding BridgeStatus}" Margin="0,0,0,8" />
+            <TextBlock Text="{Binding HmdPoseState}" TextWrapping="Wrap" Margin="0,0,0,8" />
+            <TextBlock Text="{Binding LeftControllerState}" Margin="0,0,0,4" />
+            <TextBlock Text="{Binding RightControllerState}" TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </ScrollViewer>
 
     <StackPanel Grid.Row="2" Orientation="Horizontal">
       <Button Content="Save Settings" Width="120" Command="{Binding SaveSettingsCommand}" />
