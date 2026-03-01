@@ -62,6 +62,9 @@ public partial class App : System.Windows.Application
             var settingsStore = new SettingsStore(logger);
             var settings = settingsStore.Load();
             var startupRegistryService = new StartupRegistryService();
+            var openXrInputService = new OpenXrInputService();
+            var openXrInstanceResult = openXrInputService.CreateAndDestroyInstance();
+            logger.Info($"OpenXR instance create result: {openXrInstanceResult}");
 
             var mainViewModel = new MainViewModel(
                 settings,
