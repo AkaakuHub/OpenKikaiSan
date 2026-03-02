@@ -22,6 +22,12 @@ public sealed unsafe partial class OpenXrControllerInputService
     private readonly byte[][] _eyeScratchBuffers = new byte[StereoViewCount][];
     private readonly int[] _eyeScratchWidths = new int[StereoViewCount];
     private readonly int[] _eyeScratchHeights = new int[StereoViewCount];
+    private readonly int[][] _eyeSampleXMaps = new int[StereoViewCount][];
+    private readonly int[][] _eyeSampleYMaps = new int[StereoViewCount][];
+    private readonly int[] _eyeMapSourceWidths = new int[StereoViewCount];
+    private readonly int[] _eyeMapSourceHeights = new int[StereoViewCount];
+    private readonly int[] _eyeMapTargetWidths = new int[StereoViewCount];
+    private readonly int[] _eyeMapTargetHeights = new int[StereoViewCount];
 
     private byte[]? _latestSbsBgra;
     private int _latestSbsWidth;
@@ -399,7 +405,7 @@ public sealed unsafe partial class OpenXrControllerInputService
         }
     }
 
-    private static void CopySbsHalfToTarget(
+    private void CopySbsHalfToTarget(
         byte[] sourceBgra,
         int sourceWidth,
         int sourceVisibleHeight,
@@ -417,20 +423,71 @@ public sealed unsafe partial class OpenXrControllerInputService
             return;
         }
 
+        var (xMap, yMap) = EnsureSamplingMaps(
+            eye,
+            sourceWidth,
+            sourceHeight,
+            targetWidth,
+            targetHeight
+        );
         for (var y = 0; y < targetHeight; y++)
         {
-            var srcY = y * sourceHeight / targetHeight;
+            var srcY = yMap[y];
+            var srcRowStart = srcY * sourceWidth * 4;
+            var dstRowStart = y * targetWidth * 4;
             for (var x = 0; x < targetWidth; x++)
             {
-                var srcX = srcStartX + (x * halfWidth / targetWidth);
-                var srcIndex = (srcY * sourceWidth + srcX) * 4;
-                var dstIndex = (y * targetWidth + x) * 4;
+                var srcX = srcStartX + xMap[x];
+                var srcIndex = srcRowStart + (srcX * 4);
+                var dstIndex = dstRowStart + (x * 4);
                 targetBgra[dstIndex] = sourceBgra[srcIndex];
                 targetBgra[dstIndex + 1] = sourceBgra[srcIndex + 1];
                 targetBgra[dstIndex + 2] = sourceBgra[srcIndex + 2];
                 targetBgra[dstIndex + 3] = 255;
             }
         }
+    }
+
+    private (int[] xMap, int[] yMap) EnsureSamplingMaps(
+        int eye,
+        int sourceWidth,
+        int sourceVisibleHeight,
+        int targetWidth,
+        int targetHeight
+    )
+    {
+        if (
+            _eyeSampleXMaps[eye] is not null
+            && _eyeSampleYMaps[eye] is not null
+            && _eyeMapSourceWidths[eye] == sourceWidth
+            && _eyeMapSourceHeights[eye] == sourceVisibleHeight
+            && _eyeMapTargetWidths[eye] == targetWidth
+            && _eyeMapTargetHeights[eye] == targetHeight
+        )
+        {
+            return (_eyeSampleXMaps[eye]!, _eyeSampleYMaps[eye]!);
+        }
+
+        var halfWidth = sourceWidth / 2;
+        var xMap = new int[targetWidth];
+        for (var x = 0; x < targetWidth; x++)
+        {
+            xMap[x] = x * halfWidth / targetWidth;
+        }
+
+        var yMap = new int[targetHeight];
+        for (var y = 0; y < targetHeight; y++)
+        {
+            yMap[y] = y * sourceVisibleHeight / targetHeight;
+        }
+
+        _eyeSampleXMaps[eye] = xMap;
+        _eyeSampleYMaps[eye] = yMap;
+        _eyeMapSourceWidths[eye] = sourceWidth;
+        _eyeMapSourceHeights[eye] = sourceVisibleHeight;
+        _eyeMapTargetWidths[eye] = targetWidth;
+        _eyeMapTargetHeights[eye] = targetHeight;
+        return (xMap, yMap);
     }
 
     private byte[] EnsureEyeScratchBuffer(int eye, int width, int height)

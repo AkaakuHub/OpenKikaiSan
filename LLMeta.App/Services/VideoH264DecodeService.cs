@@ -89,7 +89,7 @@ public sealed class VideoH264DecodeService : IDisposable
             buffer.CurrentLength = packet.Payload.Length;
             sample.AddBuffer(buffer);
             sample.SampleTime = _sampleTime100Ns;
-            sample.SampleDuration = 10_000_000 / 90;
+            sample.SampleDuration = 10_000_000 / DefaultInputFrameRateNumerator;
             _sampleTime100Ns += sample.SampleDuration;
 
             var inputStatus = _decoder.GetInputStatus(0);

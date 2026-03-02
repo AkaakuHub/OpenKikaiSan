@@ -6,5 +6,10 @@ public readonly record struct VideoStreamStats(
     ulong LastTimestampUnixMs,
     uint DroppedFrames,
     int LastPayloadSize,
-    long LastLatencyMs
+    long LastLatencyMs,
+    uint QueueDepth,
+    ulong RawRtpPackets,
+    double ReceivedFps,
+    double ReceivedBitrateKbps,
+    uint PliRequests
 );

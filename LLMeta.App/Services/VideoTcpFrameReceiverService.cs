@@ -262,7 +262,12 @@ public sealed class VideoTcpFrameReceiverService : IDisposable
                 header.TimestampUnixMs,
                 dropped,
                 payload.Length,
-                latencyMs
+                latencyMs,
+                (uint)_frameQueue.Count,
+                0,
+                0,
+                0,
+                0
             );
             UpdateStatus(
                 "Video: connected"

@@ -29,6 +29,12 @@ public sealed class WebRtcPeerConnectionService : IDisposable
     private string _currentVideoCodecName = "unknown";
     private string _candidateMid = "0";
     private ushort _candidateMLineIndex;
+    private DateTimeOffset _receiveWindowStartedAt = DateTimeOffset.MinValue;
+    private uint _receiveWindowFrames;
+    private ulong _receiveWindowBytes;
+    private double _receiveFps;
+    private double _receiveBitrateKbps;
+    private uint _pliRequests;
 
     public WebRtcPeerConnectionService(AppLogger logger)
     {
@@ -64,6 +70,17 @@ public sealed class WebRtcPeerConnectionService : IDisposable
             }
 
             frame = _videoFrameQueue.Dequeue();
+            var nowUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var latencyMs = nowUnixMs - (long)frame.TimestampUnixMs;
+            if (latencyMs < 0)
+            {
+                latencyMs = 0;
+            }
+            _videoStats = _videoStats with
+            {
+                LastLatencyMs = latencyMs,
+                QueueDepth = (uint)_videoFrameQueue.Count,
+            };
             return true;
         }
     }
@@ -85,7 +102,18 @@ public sealed class WebRtcPeerConnectionService : IDisposable
                 frame = _videoFrameQueue.Dequeue();
                 dropped += 1;
             }
-            _videoStats = _videoStats with { DroppedFrames = dropped };
+            var nowUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var latencyMs = nowUnixMs - (long)frame.TimestampUnixMs;
+            if (latencyMs < 0)
+            {
+                latencyMs = 0;
+            }
+            _videoStats = _videoStats with
+            {
+                DroppedFrames = dropped,
+                LastLatencyMs = latencyMs,
+                QueueDepth = (uint)_videoFrameQueue.Count,
+            };
             return true;
         }
     }
@@ -116,6 +144,11 @@ public sealed class WebRtcPeerConnectionService : IDisposable
         var senderSsrc = activePeerConnection.VideoRtcpSession?.Ssrc ?? 0;
         var pli = new RTCPFeedback(senderSsrc, remoteVideoSsrc, PSFBFeedbackTypesEnum.PLI);
         activePeerConnection.SendRtcpFeedback(SDPMediaTypesEnum.video, pli);
+        lock (_stateLock)
+        {
+            _pliRequests += 1;
+            _videoStats = _videoStats with { PliRequests = _pliRequests };
+        }
     }
 
     public void Dispose()
@@ -127,6 +160,12 @@ public sealed class WebRtcPeerConnectionService : IDisposable
             _remoteVideoSsrc = 0;
             _rawVideoRtpPackets = 0;
             _currentVideoCodecName = "unknown";
+            _receiveWindowStartedAt = DateTimeOffset.MinValue;
+            _receiveWindowFrames = 0;
+            _receiveWindowBytes = 0;
+            _receiveFps = 0;
+            _receiveBitrateKbps = 0;
+            _pliRequests = 0;
         }
         ClosePeerConnection();
     }
@@ -301,13 +340,24 @@ public sealed class WebRtcPeerConnectionService : IDisposable
             _currentVideoCodecName = "unknown";
             _candidateMid = "0";
             _candidateMLineIndex = 0;
+            _receiveWindowStartedAt = DateTimeOffset.MinValue;
+            _receiveWindowFrames = 0;
+            _receiveWindowBytes = 0;
+            _receiveFps = 0;
+            _receiveBitrateKbps = 0;
+            _pliRequests = 0;
             _videoStats = new VideoStreamStats(
                 IsConnected: false,
                 LastSequence: 0,
                 LastTimestampUnixMs: 0,
                 DroppedFrames: 0,
                 LastPayloadSize: 0,
-                LastLatencyMs: 0
+                LastLatencyMs: 0,
+                QueueDepth: 0,
+                RawRtpPackets: 0,
+                ReceivedFps: 0,
+                ReceivedBitrateKbps: 0,
+                PliRequests: 0
             );
         }
 
@@ -400,7 +450,7 @@ public sealed class WebRtcPeerConnectionService : IDisposable
             {
                 _remoteVideoSsrc = rtpPacket.Header.SyncSource;
                 _rawVideoRtpPackets += 1;
-                if (_rawVideoRtpPackets <= 5 || _rawVideoRtpPackets % 120 == 0)
+                if (_rawVideoRtpPackets <= 5 || _rawVideoRtpPackets % 3000 == 0)
                 {
                     _logger.Info(
                         $"WebRTC raw RTP video packets: count={_rawVideoRtpPackets} pt={rtpPacket.Header.PayloadType} ssrc={_remoteVideoSsrc}"
@@ -450,6 +500,22 @@ public sealed class WebRtcPeerConnectionService : IDisposable
                 Payload: payload
             );
             _videoFrameQueue.Enqueue(packet);
+            var now = DateTimeOffset.UtcNow;
+            if (_receiveWindowStartedAt == DateTimeOffset.MinValue)
+            {
+                _receiveWindowStartedAt = now;
+            }
+            _receiveWindowFrames += 1;
+            _receiveWindowBytes += (ulong)payload.Length;
+            var windowSeconds = (now - _receiveWindowStartedAt).TotalSeconds;
+            if (windowSeconds >= 1.0)
+            {
+                _receiveFps = _receiveWindowFrames / windowSeconds;
+                _receiveBitrateKbps = (_receiveWindowBytes * 8.0) / 1000.0 / windowSeconds;
+                _receiveWindowFrames = 0;
+                _receiveWindowBytes = 0;
+                _receiveWindowStartedAt = now;
+            }
 
             _videoStats = new VideoStreamStats(
                 IsConnected: _videoStats.IsConnected,
@@ -457,7 +523,12 @@ public sealed class WebRtcPeerConnectionService : IDisposable
                 LastTimestampUnixMs: timestampUnixMs,
                 DroppedFrames: dropped,
                 LastPayloadSize: payload.Length,
-                LastLatencyMs: 0
+                LastLatencyMs: _videoStats.LastLatencyMs,
+                QueueDepth: (uint)_videoFrameQueue.Count,
+                RawRtpPackets: _rawVideoRtpPackets,
+                ReceivedFps: _receiveFps,
+                ReceivedBitrateKbps: _receiveBitrateKbps,
+                PliRequests: _pliRequests
             );
         }
     }
