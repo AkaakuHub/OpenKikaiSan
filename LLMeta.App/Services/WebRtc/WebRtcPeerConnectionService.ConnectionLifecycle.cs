@@ -35,6 +35,7 @@ public sealed partial class WebRtcPeerConnectionService
                 IsConnected: false,
                 LastSequence: 0,
                 LastTimestampUnixMs: 0,
+                LastRtpTimestampUnixMs: 0,
                 DroppedFrames: 0,
                 LastPayloadSize: 0,
                 LastLatencyMs: 0,
@@ -95,9 +96,7 @@ public sealed partial class WebRtcPeerConnectionService
         };
         _peerConnection.onconnectionstatechange += state =>
         {
-            var connected =
-                state == RTCPeerConnectionState.connected
-                || state == RTCPeerConnectionState.connecting;
+            var connected = state == RTCPeerConnectionState.connected;
             lock (_stateLock)
             {
                 _videoStats = _videoStats with { IsConnected = connected };
@@ -131,16 +130,31 @@ public sealed partial class WebRtcPeerConnectionService
                 return;
             }
 
+            var shouldLogPacket = false;
+            ulong packetCount = 0;
+            int packetType = 0;
+            uint packetSsrc = 0;
+            var nowUnixMs = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             lock (_stateLock)
             {
                 _remoteVideoSsrc = rtpPacket.Header.SyncSource;
                 _rawVideoRtpPackets += 1;
-                if (_rawVideoRtpPackets <= 5 || _rawVideoRtpPackets % 3000 == 0)
+                _videoStats = _videoStats with
                 {
-                    _logger.Info(
-                        $"WebRTC raw RTP video packets: count={_rawVideoRtpPackets} pt={rtpPacket.Header.PayloadType} ssrc={_remoteVideoSsrc}"
-                    );
-                }
+                    RawRtpPackets = _rawVideoRtpPackets,
+                    LastRtpTimestampUnixMs = nowUnixMs,
+                };
+                shouldLogPacket = _rawVideoRtpPackets <= 5 || _rawVideoRtpPackets % 3000 == 0;
+                packetCount = _rawVideoRtpPackets;
+                packetType = rtpPacket.Header.PayloadType;
+                packetSsrc = _remoteVideoSsrc;
+            }
+
+            if (shouldLogPacket)
+            {
+                _logger.Info(
+                    $"WebRTC raw RTP video packets: count={packetCount} pt={packetType} ssrc={packetSsrc}"
+                );
             }
         };
 

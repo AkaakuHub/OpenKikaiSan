@@ -9,18 +9,47 @@ public partial class App
 {
     private const int DecodeCatchupQueueDepth = 3;
     private const int DecodeCatchupQueueDelayMs = 60;
+    private const int ReceiveStallThresholdMs = 1500;
+    private const int DecodeStallThresholdMs = 1200;
+    private const int KeyFrameRequestIntervalMs = 1200;
+    private const int VideoLoopStallLogThresholdMs = 2000;
+    private const int VideoLoopStallLogIntervalMs = 1500;
+    private const int RenderStallLogThresholdMs = 1500;
+    private const int RenderStallLogIntervalMs = 1500;
 
     private async Task VideoDecodeLoopAsync(CancellationToken token, AppLogger logger)
     {
+        UpdateVideoLoopCheckpoint("loop-start");
         while (!token.IsCancellationRequested)
         {
             try
             {
+                UpdateVideoLoopCheckpoint("loop-iteration");
                 var activeWebRtcPeerConnectionService = _webRtcPeerConnectionService;
                 var activeVideoDecodeService = _videoH264DecodeService;
+                if (
+                    activeVideoDecodeService is not null
+                    && _openXrControllerInputService is not null
+                )
+                {
+                    UpdateVideoLoopCheckpoint("set-d3d11-device");
+                    activeVideoDecodeService.SetD3D11DevicePointer(
+                        _openXrControllerInputService.GetD3D11DevicePointer()
+                    );
+                    UpdateVideoLoopCheckpoint("set-d3d11-device-done");
+                }
                 var queueSnapshot = activeWebRtcPeerConnectionService?.GetVideoStatsSnapshot();
+                bool waitingForKeyFrame;
+                uint consecutiveNoFrameDecodes;
+                lock (_runtimeStateLock)
+                {
+                    waitingForKeyFrame = _isWaitingForVideoKeyFrame;
+                    consecutiveNoFrameDecodes = _videoConsecutiveNoFrameDecodes;
+                }
                 var shouldCatchupToLatest =
                     queueSnapshot is not null
+                    && !waitingForKeyFrame
+                    && consecutiveNoFrameDecodes < 3
                     && (
                         queueSnapshot.Value.QueueDepth >= DecodeCatchupQueueDepth
                         || queueSnapshot.Value.LastLatencyMs >= DecodeCatchupQueueDelayMs
@@ -43,6 +72,43 @@ public partial class App
                     || !hasPacket
                 )
                 {
+                    UpdateVideoLoopCheckpoint("wait-packet");
+                    if (activeWebRtcPeerConnectionService is not null && queueSnapshot is not null)
+                    {
+                        var stallNow = DateTimeOffset.UtcNow;
+                        var nowUnixMs = stallNow.ToUnixTimeMilliseconds();
+                        var lastRxUnixMs = Math.Max(
+                            (long)queueSnapshot.Value.LastTimestampUnixMs,
+                            (long)queueSnapshot.Value.LastRtpTimestampUnixMs
+                        );
+                        var receiveStalled =
+                            queueSnapshot.Value.IsConnected
+                            && queueSnapshot.Value.QueueDepth == 0
+                            && lastRxUnixMs > 0
+                            && nowUnixMs - lastRxUnixMs >= ReceiveStallThresholdMs;
+                        if (receiveStalled)
+                        {
+                            lock (_runtimeStateLock)
+                            {
+                                if (
+                                    _lastVideoKeyFrameRequestAt == DateTimeOffset.MinValue
+                                    || (stallNow - _lastVideoKeyFrameRequestAt).TotalMilliseconds
+                                        >= KeyFrameRequestIntervalMs
+                                )
+                                {
+                                    _lastVideoKeyFrameRequestAt = stallNow;
+                                    _isWaitingForVideoKeyFrame = true;
+                                    _lastVideoDecodeStatus = "rx stalled; keyframe requested";
+                                    activeWebRtcPeerConnectionService.RequestVideoKeyFrame();
+                                }
+                                else
+                                {
+                                    _lastVideoDecodeStatus = "rx stalled; waiting keyframe";
+                                }
+                            }
+                        }
+                    }
+
                     MaybeLogVideoPipelineStats(logger);
                     await Task.Yield();
                     continue;
@@ -102,7 +168,8 @@ public partial class App
                     {
                         if (
                             _lastVideoKeyFrameRequestAt == DateTimeOffset.MinValue
-                            || (now - _lastVideoKeyFrameRequestAt).TotalMilliseconds >= 1000
+                            || (now - _lastVideoKeyFrameRequestAt).TotalMilliseconds
+                                >= KeyFrameRequestIntervalMs
                         )
                         {
                             _lastVideoKeyFrameRequestAt = now;
@@ -121,7 +188,13 @@ public partial class App
                 }
                 var decodeStartedAt = DateTimeOffset.UtcNow;
                 var decodeStopwatch = Stopwatch.StartNew();
+                UpdateVideoLoopCheckpoint(
+                    $"decode-start conn={encodedPacket.ConnectionId} seq={encodedPacket.Sequence}"
+                );
                 var decodeStatus = activeVideoDecodeService.Decode(encodedPacket);
+                UpdateVideoLoopCheckpoint(
+                    $"decode-done conn={encodedPacket.ConnectionId} seq={encodedPacket.Sequence} status={decodeStatus}"
+                );
                 decodeStopwatch.Stop();
                 var decodeCompletedAt = DateTimeOffset.UtcNow;
                 lock (_runtimeStateLock)
@@ -139,18 +212,49 @@ public partial class App
                     }
                 }
 
+                if (decodeStopwatch.ElapsedMilliseconds >= DecodeStallThresholdMs)
+                {
+                    logger.Info(
+                        "Video decode stall detected; decoder will be recreated. "
+                            + $"elapsedMs={decodeStopwatch.ElapsedMilliseconds} seq={encodedPacket.Sequence}"
+                    );
+                    _videoH264DecodeService?.Dispose();
+                    _videoH264DecodeService = new VideoH264DecodeService(logger);
+                    if (_openXrControllerInputService is not null)
+                    {
+                        _videoH264DecodeService.SetD3D11DevicePointer(
+                            _openXrControllerInputService.GetD3D11DevicePointer()
+                        );
+                    }
+
+                    lock (_runtimeStateLock)
+                    {
+                        _isWaitingForVideoKeyFrame = true;
+                        _videoConsecutiveNoFrameDecodes = 0;
+                        _lastVideoKeyFrameRequestAt = now;
+                        _lastVideoDecodeStatus = "decode stall; keyframe requested";
+                    }
+
+                    activeWebRtcPeerConnectionService.RequestVideoKeyFrame();
+                    MaybeLogVideoPipelineStats(logger);
+                    await Task.Yield();
+                    continue;
+                }
+
                 if (
                     _videoH264DecodeService is not null
                     && _videoH264DecodeService.TryGetLatestFrame(out var decodedFrame)
                     && _openXrControllerInputService is not null
                 )
                 {
+                    UpdateVideoLoopCheckpoint($"upload-start seq={decodedFrame.Sequence}");
                     lock (_runtimeStateLock)
                     {
                         _videoDecodedFrames += 1;
                         _lastVideoDecodedAt = now;
                     }
                     _openXrControllerInputService.SetLatestDecodedSbsFrame(decodedFrame);
+                    UpdateVideoLoopCheckpoint($"upload-done seq={decodedFrame.Sequence}");
                 }
 
                 lock (_runtimeStateLock)
@@ -165,7 +269,8 @@ public partial class App
                     {
                         if (
                             _lastVideoKeyFrameRequestAt == DateTimeOffset.MinValue
-                            || (now - _lastVideoKeyFrameRequestAt).TotalMilliseconds >= 1200
+                            || (now - _lastVideoKeyFrameRequestAt).TotalMilliseconds
+                                >= KeyFrameRequestIntervalMs
                         )
                         {
                             _lastVideoKeyFrameRequestAt = now;
@@ -209,6 +314,7 @@ public partial class App
                 }
 
                 MaybeLogVideoPipelineStats(logger);
+                UpdateVideoLoopCheckpoint("loop-idle");
             }
             catch (OperationCanceledException)
             {
@@ -243,6 +349,8 @@ public partial class App
         uint decodedFrames;
         string decodeStatus;
         long decodeElapsedMs;
+        DateTimeOffset checkpointAt;
+        string checkpointLabel;
         lock (_runtimeStateLock)
         {
             if (
@@ -260,9 +368,17 @@ public partial class App
             decodedFrames = _videoDecodedFrames;
             decodeStatus = _lastVideoDecodeStatus;
             decodeElapsedMs = _lastDecodeElapsedMs;
+            checkpointAt = _videoLoopCheckpointAt;
+            checkpointLabel = _videoLoopCheckpointLabel;
         }
 
         var stats = _webRtcPeerConnectionService.GetVideoStatsSnapshot();
+        var renderStats = _openXrControllerInputService?.GetVideoRenderStatsSnapshot();
+        var checkpointAgeMs =
+            checkpointAt == DateTimeOffset.MinValue
+                ? -1
+                : (long)(DateTimeOffset.UtcNow - checkpointAt).TotalMilliseconds;
+        MaybeLogRenderStall(logger, stats, renderStats, decodedFrames);
         logger.Info(
             "Video pipeline stats: "
                 + $"conn={connectionId} connected={stats.IsConnected} "
@@ -271,13 +387,133 @@ public partial class App
                 + $"lastSeq={stats.LastSequence} lastPayload={stats.LastPayloadSize} "
                 + $"queue={stats.QueueDepth} queueDelayMs={stats.LastLatencyMs} "
                 + $"rxFps={stats.ReceivedFps:F1} rxKbps={stats.ReceivedBitrateKbps:F0} "
-                + $"rawRtpPkts={stats.RawRtpPackets} pliReq={stats.PliRequests} "
-                + $"renSeq={_openXrControllerInputService?.GetVideoRenderStatsSnapshot().LastRenderedSequence ?? 0} "
-                + $"renAgeRxMs={_openXrControllerInputService?.GetVideoRenderStatsSnapshot().LastRenderedAgeFromReceiveMs ?? 0} "
-                + $"renAgeDecMs={_openXrControllerInputService?.GetVideoRenderStatsSnapshot().LastRenderedAgeFromDecodeMs ?? 0} "
-                + $"renFail={_openXrControllerInputService?.GetVideoRenderStatsSnapshot().LastUploadFailureCode ?? 0} "
+                + $"rawRtpPkts={stats.RawRtpPackets} lastRtpTs={stats.LastRtpTimestampUnixMs} pliReq={stats.PliRequests} "
+                + $"renSeq={(renderStats?.LastRenderedSequence ?? 0)} "
+                + $"renAgeRxMs={(renderStats?.LastRenderedAgeFromReceiveMs ?? 0)} "
+                + $"renAgeDecMs={(renderStats?.LastRenderedAgeFromDecodeMs ?? 0)} "
+                + $"renFail={(renderStats?.LastUploadFailureCode ?? 0)} "
                 + $"decodeMs={decodeElapsedMs} "
+                + $"loopCp={checkpointLabel} "
+                + $"loopCpAgeMs={checkpointAgeMs} "
                 + $"lastDecodeStatus={decodeStatus}"
+        );
+    }
+
+    private void MaybeLogRenderStall(
+        AppLogger logger,
+        VideoStreamStats stats,
+        OpenXrVideoRenderStats? renderStats,
+        uint decodedFrames
+    )
+    {
+        if (renderStats is null || !stats.IsConnected)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var renderedSequence = renderStats.Value.LastRenderedSequence;
+        var decodedAdvanced = decodedFrames > _lastRenderProgressDecodedFrames;
+        var renderAdvanced = renderedSequence > _lastRenderProgressSequence;
+
+        if (renderAdvanced || _lastRenderProgressAt == DateTimeOffset.MinValue)
+        {
+            _lastRenderProgressSequence = renderedSequence;
+            _lastRenderProgressDecodedFrames = decodedFrames;
+            _lastRenderProgressAt = now;
+            return;
+        }
+
+        if (!decodedAdvanced)
+        {
+            return;
+        }
+
+        var stalledMs = (long)(now - _lastRenderProgressAt).TotalMilliseconds;
+        if (stalledMs < RenderStallLogThresholdMs)
+        {
+            return;
+        }
+
+        if (
+            _lastRenderStallLogAt != DateTimeOffset.MinValue
+            && (now - _lastRenderStallLogAt).TotalMilliseconds < RenderStallLogIntervalMs
+        )
+        {
+            return;
+        }
+
+        _lastRenderStallLogAt = now;
+        logger.Info(
+            "Render stall suspect: "
+                + $"renSeq={renderedSequence} decodedFrames={decodedFrames} stalledMs={stalledMs} "
+                + $"renFail={renderStats.Value.LastUploadFailureCode} "
+                + $"session={_latestOpenXrState.Status} "
+                + $"rawRtpPkts={stats.RawRtpPackets} lastRtpTs={stats.LastRtpTimestampUnixMs}"
+        );
+    }
+
+    private void UpdateVideoLoopCheckpoint(string label)
+    {
+        lock (_runtimeStateLock)
+        {
+            _videoLoopCheckpointAt = DateTimeOffset.UtcNow;
+            _videoLoopCheckpointLabel = label;
+        }
+    }
+
+    private void MaybeLogVideoLoopStall(AppLogger logger)
+    {
+        if (_webRtcPeerConnectionService is null)
+        {
+            return;
+        }
+
+        var stats = _webRtcPeerConnectionService.GetVideoStatsSnapshot();
+        DateTimeOffset checkpointAt;
+        string checkpointLabel;
+        DateTimeOffset lastStallLogAt;
+        lock (_runtimeStateLock)
+        {
+            checkpointAt = _videoLoopCheckpointAt;
+            checkpointLabel = _videoLoopCheckpointLabel;
+            lastStallLogAt = _lastVideoLoopStallLogAt;
+        }
+
+        if (!stats.IsConnected || checkpointAt == DateTimeOffset.MinValue)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var checkpointAgeMs = (long)(now - checkpointAt).TotalMilliseconds;
+        if (checkpointAgeMs < VideoLoopStallLogThresholdMs)
+        {
+            return;
+        }
+
+        if (
+            lastStallLogAt != DateTimeOffset.MinValue
+            && (now - lastStallLogAt).TotalMilliseconds < VideoLoopStallLogIntervalMs
+        )
+        {
+            return;
+        }
+
+        lock (_runtimeStateLock)
+        {
+            _lastVideoLoopStallLogAt = now;
+        }
+
+        var decodeDiag = _videoH264DecodeService?.GetDecodeDiagnosticSnapshot();
+        logger.Info(
+            "Video loop stall suspect: "
+                + $"checkpoint={checkpointLabel} ageMs={checkpointAgeMs} "
+                + $"rawRtpPkts={stats.RawRtpPackets} lastRtpTs={stats.LastRtpTimestampUnixMs} "
+                + $"queue={stats.QueueDepth} lastSeq={stats.LastSequence} pliReq={stats.PliRequests} "
+                + $"decodeStage={(decodeDiag?.Stage ?? "unknown")} "
+                + $"decodeSeq={(decodeDiag?.Sequence ?? 0)} "
+                + $"decodeStageAgeMs={(decodeDiag?.StageAgeMs ?? -1)}"
         );
     }
 
@@ -296,6 +532,13 @@ public partial class App
             _videoConsecutiveNoFrameDecodes = 0;
             _lastVideoDecodedAt = DateTimeOffset.MinValue;
             _isWaitingForVideoKeyFrame = true;
+            _videoLoopCheckpointAt = DateTimeOffset.UtcNow;
+            _videoLoopCheckpointLabel = "reset";
+            _lastVideoLoopStallLogAt = DateTimeOffset.MinValue;
+            _lastRenderProgressSequence = 0;
+            _lastRenderProgressDecodedFrames = 0;
+            _lastRenderProgressAt = DateTimeOffset.MinValue;
+            _lastRenderStallLogAt = DateTimeOffset.MinValue;
             _latestVideoStatus = WaitingVideoStatus;
         }
     }

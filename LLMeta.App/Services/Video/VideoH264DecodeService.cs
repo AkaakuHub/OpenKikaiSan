@@ -35,6 +35,12 @@ public sealed partial class VideoH264DecodeService : IDisposable
     private DecodedVideoFrame? _latestFrame;
     private readonly object _frameLock = new();
     private bool _loggedFirstDecodedFrame;
+    private DateTimeOffset _retryAfter = DateTimeOffset.MinValue;
+    private string _lastFailureStatus = "none";
+    private readonly object _diagLock = new();
+    private string _decodeStage = "idle";
+    private uint _decodeSequence;
+    private DateTimeOffset _decodeStageAt = DateTimeOffset.MinValue;
 
     public VideoH264DecodeService(AppLogger logger)
     {
@@ -71,17 +77,29 @@ public sealed partial class VideoH264DecodeService : IDisposable
 
     public string Decode(VideoFramePacket packet)
     {
+        SetDecodeStage("decode-enter", packet.Sequence);
+        var now = DateTimeOffset.UtcNow;
+        if (now < _retryAfter)
+        {
+            SetDecodeStage("retry-wait", packet.Sequence);
+            return _lastFailureStatus;
+        }
+
         try
         {
+            SetDecodeStage("ensure-started", packet.Sequence);
             EnsureStarted(packet.CodecName);
             if (_decoder is null)
             {
+                SetDecodeStage("decoder-null", packet.Sequence);
                 return "decoder unavailable (" + packet.CodecName + ")";
             }
 
+            SetDecodeStage("create-sample", packet.Sequence);
             using var sample = MediaFactory.MFCreateSample();
             using var buffer = MediaFactory.MFCreateMemoryBuffer(packet.Payload.Length);
 
+            SetDecodeStage("buffer-lock", packet.Sequence);
             buffer.Lock(out var pBuffer, out _, out _);
             try
             {
@@ -92,32 +110,47 @@ public sealed partial class VideoH264DecodeService : IDisposable
                 buffer.Unlock();
             }
 
+            SetDecodeStage("buffer-finalize", packet.Sequence);
             buffer.CurrentLength = packet.Payload.Length;
             sample.AddBuffer(buffer);
             sample.SampleTime = _sampleTime100Ns;
             sample.SampleDuration = 10_000_000 / DefaultInputFrameRateNumerator;
             _sampleTime100Ns += sample.SampleDuration;
 
-            var inputStatus = _decoder.GetInputStatus(0);
-            if ((inputStatus & (int)InputStatusFlags.InputStatusAcceptData) == 0)
-            {
-                _ = DrainOutputs(packet, out _);
-            }
-
+            SetDecodeStage("process-input", packet.Sequence);
             _decoder.ProcessInput(0, sample, 0);
+            SetDecodeStage("drain-after-input", packet.Sequence);
             var drained = DrainOutputs(packet, out var producedFrame);
             if (!drained)
             {
+                SetDecodeStage("need-more-input", packet.Sequence);
                 return "need more input";
             }
 
+            _lastFailureStatus = "none";
+            SetDecodeStage("decode-exit", packet.Sequence);
             return producedFrame ? "decoded frame" : "drained no frame";
         }
         catch (Exception ex)
         {
+            SetDecodeStage("decode-exception", packet.Sequence);
             _logger.Error("Video decode failed.", ex);
             ResetDecoderAfterFailure();
-            return "decode failed (" + packet.CodecName + "): " + ex.Message;
+            _retryAfter = DateTimeOffset.UtcNow.AddMilliseconds(250);
+            _lastFailureStatus = "decode failed (" + packet.CodecName + "): " + ex.Message;
+            return _lastFailureStatus;
+        }
+    }
+
+    public (string Stage, uint Sequence, long StageAgeMs) GetDecodeDiagnosticSnapshot()
+    {
+        lock (_diagLock)
+        {
+            var ageMs =
+                _decodeStageAt == DateTimeOffset.MinValue
+                    ? -1
+                    : (long)(DateTimeOffset.UtcNow - _decodeStageAt).TotalMilliseconds;
+            return (_decodeStage, _decodeSequence, ageMs);
         }
     }
 
@@ -172,7 +205,6 @@ public sealed partial class VideoH264DecodeService : IDisposable
         }
         _decoder = decoderTransform;
         ApplyDecoderLatencyAttributes();
-
         try
         {
             ApplyDecoderInputType(inputSubtype);
@@ -189,9 +221,7 @@ public sealed partial class VideoH264DecodeService : IDisposable
 
             ApplyDecoderInputType(inputSubtype);
         }
-
         ConfigureDecoderD3D11DeviceManager();
-
         if (!TrySetOutputType())
         {
             throw new InvalidOperationException(
@@ -279,6 +309,16 @@ public sealed partial class VideoH264DecodeService : IDisposable
             }
 
             _latestFrame = null;
+        }
+    }
+
+    private void SetDecodeStage(string stage, uint sequence)
+    {
+        lock (_diagLock)
+        {
+            _decodeStage = stage;
+            _decodeSequence = sequence;
+            _decodeStageAt = DateTimeOffset.UtcNow;
         }
     }
 }

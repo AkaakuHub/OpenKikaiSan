@@ -21,6 +21,8 @@ public sealed partial class WebRtcPeerConnectionService
             }
 
             var timestampUnixMs = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var payloadCopy = new byte[payload.Length];
+            Buffer.BlockCopy(payload, 0, payloadCopy, 0, payload.Length);
             var packet = new VideoFramePacket(
                 ConnectionId: _videoConnectionId,
                 Sequence: sequence,
@@ -29,7 +31,7 @@ public sealed partial class WebRtcPeerConnectionService
                 IsKeyFrame: isKeyFrame,
                 HasCodecConfig: false,
                 CodecName: _currentVideoCodecName,
-                Payload: payload
+                Payload: payloadCopy
             );
             _videoFrameQueue.Enqueue(packet);
             var now = DateTimeOffset.UtcNow;
@@ -53,11 +55,12 @@ public sealed partial class WebRtcPeerConnectionService
                 IsConnected: _videoStats.IsConnected,
                 LastSequence: sequence,
                 LastTimestampUnixMs: timestampUnixMs,
+                LastRtpTimestampUnixMs: _videoStats.LastRtpTimestampUnixMs,
                 DroppedFrames: dropped,
                 LastPayloadSize: payload.Length,
                 LastLatencyMs: _videoStats.LastLatencyMs,
                 QueueDepth: (uint)_videoFrameQueue.Count,
-                RawRtpPackets: _rawVideoRtpPackets,
+                RawRtpPackets: _videoStats.RawRtpPackets,
                 ReceivedFps: _receiveFps,
                 ReceivedBitrateKbps: _receiveBitrateKbps,
                 PliRequests: _pliRequests

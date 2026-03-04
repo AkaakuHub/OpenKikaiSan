@@ -47,6 +47,7 @@ public sealed partial class VideoTcpFrameReceiverService
                 _stats.IsConnected,
                 header.Sequence,
                 header.TimestampUnixMs,
+                0,
                 dropped,
                 payload.Length,
                 latencyMs,

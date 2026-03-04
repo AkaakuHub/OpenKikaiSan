@@ -46,6 +46,13 @@ public partial class App : System.Windows.Application
     private uint _videoConsecutiveNoFrameDecodes;
     private DateTimeOffset _lastVideoDecodedAt = DateTimeOffset.MinValue;
     private bool _isWaitingForVideoKeyFrame = true;
+    private DateTimeOffset _videoLoopCheckpointAt = DateTimeOffset.MinValue;
+    private string _videoLoopCheckpointLabel = "init";
+    private DateTimeOffset _lastVideoLoopStallLogAt = DateTimeOffset.MinValue;
+    private uint _lastRenderProgressSequence;
+    private uint _lastRenderProgressDecodedFrames;
+    private DateTimeOffset _lastRenderProgressAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastRenderStallLogAt = DateTimeOffset.MinValue;
 
     public App()
     {
@@ -274,6 +281,8 @@ public partial class App : System.Windows.Application
                         _lastOpenXrStatus = stateSnapshot.Status;
                         logger.Info($"OpenXR input state: {stateSnapshot.Status}");
                     }
+
+                    MaybeLogVideoLoopStall(logger);
                 };
                 _uiTimer.Start();
             }

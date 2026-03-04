@@ -67,7 +67,11 @@ public sealed unsafe partial class OpenXrControllerInputService
             var d3d11CreateResult = CreateD3D11Device();
             if (d3d11CreateResult != 0)
             {
-                return CreateState($"D3D11 create failed: 0x{d3d11CreateResult:X8}");
+                var detail =
+                    _graphicsAdapterSummary.Length > 0
+                        ? $" ({_graphicsAdapterSummary})"
+                        : string.Empty;
+                return CreateState($"D3D11 create failed: 0x{d3d11CreateResult:X8}{detail}");
             }
 
             var graphicsBinding = new GraphicsBindingD3D11KHR

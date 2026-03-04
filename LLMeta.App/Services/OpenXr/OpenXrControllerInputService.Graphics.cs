@@ -76,6 +76,7 @@ public sealed unsafe partial class OpenXrControllerInputService
         ID3D11DeviceContext* d3d11DeviceContext = null;
         IDXGIFactory1* dxgiFactory = null;
         IDXGIAdapter1* selectedAdapter = null;
+        ulong requestedAdapterLuid = _requiredGraphicsAdapterLuid;
 
         if (!_hasRequiredGraphicsAdapterLuid)
         {
@@ -93,10 +94,11 @@ public sealed unsafe partial class OpenXrControllerInputService
             }
 
             dxgiFactory = (IDXGIFactory1*)factoryPointer;
-            var requestedAdapterLuid = ParsePreferredAdapterLuidOrDefault(
+            requestedAdapterLuid = ParsePreferredAdapterLuidOrDefault(
                 _requestedGraphicsAdapterLabel,
                 _requiredGraphicsAdapterLuid
             );
+            var targetAdapterLuid = _requiredGraphicsAdapterLuid;
             lock (_videoFrameLock)
             {
                 _availableGraphicsAdapterLabels = ["Auto"];
@@ -125,18 +127,12 @@ public sealed unsafe partial class OpenXrControllerInputService
                         _availableGraphicsAdapterLabels.Add(adapterLabel);
                     }
 
-                    if (adapterLuid == requestedAdapterLuid)
+                    if (adapterLuid == targetAdapterLuid)
                     {
                         selectedAdapter = adapter;
+                        var requestedIgnored = requestedAdapterLuid != targetAdapterLuid;
                         _graphicsAdapterSummary =
-                            $"requiredLuid=0x{_requiredGraphicsAdapterLuid:X16} selectedAdapterIndex={adapterIndex} requestedLuid=0x{requestedAdapterLuid:X16}";
-                        if (requestedAdapterLuid != _requiredGraphicsAdapterLuid)
-                        {
-                            _selectedGraphicsAdapterLabel = adapterLabel;
-                            _graphicsAdapterSummary =
-                                $"{_graphicsAdapterSummary} incompatible-with-openxr-required-adapter";
-                            return unchecked((int)0x80070057);
-                        }
+                            $"requiredLuid=0x{_requiredGraphicsAdapterLuid:X16} selectedAdapterIndex={adapterIndex} requestedLuid=0x{requestedAdapterLuid:X16} requestedIgnored={requestedIgnored}";
                         _selectedGraphicsAdapterLabel = adapterLabel;
                         break;
                     }
@@ -156,7 +152,7 @@ public sealed unsafe partial class OpenXrControllerInputService
         if (selectedAdapter is null)
         {
             _graphicsAdapterSummary =
-                $"adapter-not-found requested={_requestedGraphicsAdapterLabel} requiredLuid=0x{_requiredGraphicsAdapterLuid:X16}";
+                $"adapter-not-found requested={_requestedGraphicsAdapterLabel} requestedLuid=0x{requestedAdapterLuid:X16} requiredLuid=0x{_requiredGraphicsAdapterLuid:X16}";
             return DxgiErrorNotFound;
         }
 
@@ -175,12 +171,44 @@ public sealed unsafe partial class OpenXrControllerInputService
         _ = selectedAdapter->Release();
         if (createResult >= 0)
         {
+            var multithreadProtectResult = EnableD3D11MultithreadProtection(d3d11Device);
+            if (multithreadProtectResult < 0)
+            {
+                _graphicsAdapterSummary =
+                    $"multithread-protect-failed hr=0x{multithreadProtectResult:X8} requiredLuid=0x{_requiredGraphicsAdapterLuid:X16}";
+                _ = d3d11DeviceContext->Release();
+                _ = d3d11Device->Release();
+                return multithreadProtectResult;
+            }
+
             _d3d11Device = d3d11Device;
             _d3d11DeviceContext = d3d11DeviceContext;
             return createResult;
         }
 
         return createResult;
+    }
+
+    private int EnableD3D11MultithreadProtection(ID3D11Device* d3d11Device)
+    {
+        void* multithreadPointer = null;
+        var multithreadGuid = new Guid("9B7E4E00-342C-4106-A19F-4F2704F689F0");
+        var queryResult = d3d11Device->QueryInterface(ref multithreadGuid, ref multithreadPointer);
+        if (queryResult < 0 || multithreadPointer is null)
+        {
+            return queryResult < 0 ? queryResult : unchecked((int)0x80004005);
+        }
+
+        var multithread = (ID3D11Multithread*)multithreadPointer;
+        _ = multithread->SetMultithreadProtected(1);
+        var enabled = multithread->GetMultithreadProtected();
+        _ = multithread->Release();
+        if (!enabled)
+        {
+            return unchecked((int)0x80004005);
+        }
+
+        return 0;
     }
 
     private static ulong ConvertLuidToUInt64(Luid luid)

@@ -4,6 +4,7 @@ public readonly record struct VideoStreamStats(
     bool IsConnected,
     uint LastSequence,
     ulong LastTimestampUnixMs,
+    ulong LastRtpTimestampUnixMs,
     uint DroppedFrames,
     int LastPayloadSize,
     long LastLatencyMs,
