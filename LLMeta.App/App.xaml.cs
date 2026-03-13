@@ -11,7 +11,7 @@ namespace LLMeta.App;
 
 public partial class App : System.Windows.Application
 {
-    private const int WebRtcSignalingPort = 39200;
+    private const int DefaultWebRtcSignalingPort = 39200;
     private const string EmulatorRouteHint = " (A-1: Android -> 10.0.2.2)";
     private const string OpenXrUnavailableReason =
         "OpenXR is not initialized. Click Reinitialize OpenXR or enable keyboard debug input.";
@@ -106,6 +106,14 @@ public partial class App : System.Windows.Application
             mainViewModel.SelectedSwapchainFormatOption = settings.PreferredSwapchainFormat;
             mainViewModel.SelectedGraphicsAdapterOption = settings.PreferredGraphicsAdapter;
             mainViewModel.SelectedGraphicsBackendOption = settings.PreferredGraphicsBackend;
+            var signalingPort = ResolveValidWebRtcSignalingPort(settings.WebRtcSignalingPort);
+            if (settings.WebRtcSignalingPort != signalingPort)
+            {
+                settings.WebRtcSignalingPort = signalingPort;
+                settingsStore.Save(settings);
+            }
+
+            mainViewModel.SetSignalingPortForDisplay(signalingPort);
             mainViewModel.OpenXrReinitializeRequested += () =>
             {
                 StopRealtimeLoops();
@@ -132,6 +140,14 @@ public partial class App : System.Windows.Application
                 {
                     mainViewModel.StatusMessage = "OpenXR reinitialize failed.";
                 }
+            };
+            mainViewModel.SignalingPortApplyRequested += port =>
+            {
+                settings.WebRtcSignalingPort = port;
+                settingsStore.Save(settings);
+                mainViewModel.SetSignalingPortForDisplay(port);
+                InitializeWebRtcSignalingServer(logger, port, mainViewModel);
+                mainViewModel.StatusMessage = $"WebRTC signaling port applied: {port}";
             };
             mainViewModel.VideoRenderSettingsApplyRequested += (
                 preferredSwapchainFormat,
@@ -163,41 +179,27 @@ public partial class App : System.Windows.Application
                     : "Video render settings apply failed.";
             };
 
-            _webRtcSignalingTcpServerService = new WebRtcSignalingTcpServerService(
-                logger,
-                WebRtcSignalingPort
-            );
+            InitializeWebRtcSignalingServer(logger, signalingPort, mainViewModel);
             _webRtcPeerConnectionService = new WebRtcPeerConnectionService(logger);
             mainViewModel.BridgeStatus =
                 _webRtcPeerConnectionService.GetInputChannelStatusText() + EmulatorRouteHint;
             _webRtcPeerConnectionService.OutboundSignalingMessage += outboundMessage =>
             {
-                if (_webRtcSignalingTcpServerService is null)
+                var signalingServer = _webRtcSignalingTcpServerService;
+                if (signalingServer is null)
                 {
                     return;
                 }
 
-                var sent = _webRtcSignalingTcpServerService.TrySend(outboundMessage);
+                var sent = signalingServer.TrySend(outboundMessage);
                 if (!sent)
                 {
                     logger.Info($"WebRTC signaling tx dropped: type={outboundMessage.Type}");
                 }
             };
-            _webRtcSignalingTcpServerService.MessageReceived += message =>
-            {
-                logger.Info($"WebRTC signaling rx: type={message.Type}");
-                if (_webRtcPeerConnectionService is null)
-                {
-                    return;
-                }
-
-                _ = _webRtcPeerConnectionService.HandleSignalingMessageAsync(message);
-            };
-            _webRtcSignalingTcpServerService.Start();
             _videoH264DecodeService = new VideoH264DecodeService(logger);
             ResetVideoPipelineMetrics();
             mainViewModel.VideoStatus = WaitingVideoStatus;
-            logger.Info(_webRtcSignalingTcpServerService.StatusText);
 
             var initializeState = ReinitializeOpenXr(
                 logger,
@@ -291,6 +293,47 @@ public partial class App : System.Windows.Application
             System.Windows.MessageBox.Show(ex.Message, "LLMeta Error");
             Shutdown();
         }
+    }
+
+    private static int ResolveValidWebRtcSignalingPort(int value)
+    {
+        if (value is >= 1 and <= 65535)
+        {
+            return value;
+        }
+
+        return DefaultWebRtcSignalingPort;
+    }
+
+    private void InitializeWebRtcSignalingServer(
+        AppLogger logger,
+        int signalingPort,
+        MainViewModel mainViewModel
+    )
+    {
+        var sanitizedPort = ResolveValidWebRtcSignalingPort(signalingPort);
+        if (sanitizedPort != signalingPort)
+        {
+            mainViewModel.SetSignalingPortForDisplay(sanitizedPort);
+        }
+
+        _webRtcSignalingTcpServerService?.Dispose();
+        _webRtcSignalingTcpServerService = new WebRtcSignalingTcpServerService(
+            logger,
+            sanitizedPort
+        );
+        _webRtcSignalingTcpServerService.MessageReceived += message =>
+        {
+            logger.Info($"WebRTC signaling rx: type={message.Type}");
+            if (_webRtcPeerConnectionService is null)
+            {
+                return;
+            }
+
+            _ = _webRtcPeerConnectionService.HandleSignalingMessageAsync(message);
+        };
+        _webRtcSignalingTcpServerService.Start();
+        logger.Info(_webRtcSignalingTcpServerService.StatusText);
     }
 
     protected override void OnExit(ExitEventArgs e)

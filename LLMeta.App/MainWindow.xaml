@@ -38,6 +38,19 @@
           IsChecked="{Binding IsKeyboardDebugMode}"
           Margin="0,0,0,8"
         />
+        <TextBlock Text="WebRTC signaling TCP port" Foreground="Gray" Margin="0,0,0,4" />
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+          <TextBox
+            Width="120"
+            Text="{Binding WebRtcSignalingPort, UpdateSourceTrigger=PropertyChanged}"
+            Margin="0,0,8,0"
+          />
+          <Button
+            Content="Save Signaling Port"
+            Width="170"
+            Command="{Binding ApplySignalingPortCommand}"
+          />
+        </StackPanel>
         <Button
           Content="Reinitialize OpenXR"
           Width="180"
@@ -103,10 +116,6 @@
         </Border>
       </StackPanel>
     </ScrollViewer>
-
-    <StackPanel Grid.Row="2" Orientation="Horizontal">
-      <Button Content="Save Settings" Width="120" Command="{Binding SaveSettingsCommand}" />
-    </StackPanel>
 
     <TextBlock
       Grid.Row="2"

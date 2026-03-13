@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Windows.Input;
 using LLMeta.App.Models;
@@ -11,8 +12,6 @@ namespace LLMeta.App.ViewModels;
 
 public sealed class MainViewModel : ViewModelBase
 {
-    private readonly AppSettings _settings;
-    private readonly SettingsStore _settingsStore;
     private readonly AppLogger _logger;
 
     private string _statusMessage = "Ready";
@@ -33,15 +32,15 @@ public sealed class MainViewModel : ViewModelBase
     private string _selectedGraphicsBackendOption = "D3D11";
     private string _videoRenderConfigStatus = "Video render config: not initialized";
     private string _videoRenderErrorStatus = "Video render error: none";
+    private string _webRtcSignalingPort = string.Empty;
 
     public MainViewModel(AppSettings settings, SettingsStore settingsStore, AppLogger logger)
     {
-        _settings = settings;
-        _settingsStore = settingsStore;
         _logger = logger;
         _sampleText = settings.SampleText;
+        _webRtcSignalingPort = settings.WebRtcSignalingPort.ToString(CultureInfo.InvariantCulture);
 
-        SaveSettingsCommand = new RelayCommand(_ => SaveSettings());
+        ApplySignalingPortCommand = new RelayCommand(_ => ApplySignalingPort());
         ReinitializeOpenXrCommand = new RelayCommand(_ => RequestReinitializeOpenXr());
         ApplyVideoRenderSettingsCommand = new RelayCommand(_ => RequestApplyVideoRenderSettings());
     }
@@ -88,11 +87,12 @@ public sealed class MainViewModel : ViewModelBase
         set => SetProperty(ref _rightControllerState, value);
     }
 
-    public ICommand SaveSettingsCommand { get; }
+    public ICommand ApplySignalingPortCommand { get; }
     public ICommand ReinitializeOpenXrCommand { get; }
     public ICommand ApplyVideoRenderSettingsCommand { get; }
 
     public event Action? OpenXrReinitializeRequested;
+    public event Action<int>? SignalingPortApplyRequested;
     public event Action<string, string, string>? VideoRenderSettingsApplyRequested;
 
     public string BridgeStatus
@@ -164,6 +164,12 @@ public sealed class MainViewModel : ViewModelBase
         set => SetProperty(ref _videoRenderErrorStatus, value);
     }
 
+    public string WebRtcSignalingPort
+    {
+        get => _webRtcSignalingPort;
+        set => SetProperty(ref _webRtcSignalingPort, value);
+    }
+
     public void UpdateVideoRenderConfig(OpenXrVideoRenderConfigState config, int lastFailureCode)
     {
         SetOptionsIfChanged(
@@ -222,12 +228,36 @@ public sealed class MainViewModel : ViewModelBase
             $"Right Stick ({state.RightStickX:0.00}, {state.RightStickY:0.00}) Click:{ToOnOff(state.RightStickClickPressed)} | A:{ToOnOff(state.RightAPressed)} B:{ToOnOff(state.RightBPressed)} | Trigger:{state.RightTriggerValue:0.00} | Grip:{state.RightGripValue:0.00}";
     }
 
-    private void SaveSettings()
+    public void SetSignalingPortForDisplay(int port)
     {
-        _settings.SampleText = SampleText;
-        _settingsStore.Save(_settings);
-        StatusMessage = "Settings saved!";
-        _logger.Info("Settings saved.");
+        WebRtcSignalingPort = port.ToString(CultureInfo.InvariantCulture);
+    }
+
+    private void ApplySignalingPort()
+    {
+        if (
+            !int.TryParse(
+                WebRtcSignalingPort.Trim(),
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var port
+            )
+        )
+        {
+            StatusMessage = "Invalid port format.";
+            return;
+        }
+
+        if (port < 1 || port > 65535)
+        {
+            StatusMessage = "Port must be 1 to 65535.";
+            return;
+        }
+
+        WebRtcSignalingPort = port.ToString(CultureInfo.InvariantCulture);
+        SignalingPortApplyRequested?.Invoke(port);
+        StatusMessage = $"Signaling port save requested: {port}";
+        _logger.Info($"Signaling port save requested: {port}");
     }
 
     private static string ToOnOff(bool value)
