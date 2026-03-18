@@ -1,6 +1,6 @@
 [![Platform](https://img.shields.io/badge/platform-Windows-blue)](https://github.com/AkaakuHub/refined-line)
 
-# OpenKikai
+# OpenKikaiSan
 
 OpenKikai システムのためのクライアント。
 
@@ -19,7 +19,7 @@ flowchart LR
       LK["Game"]
     end
 
-    subgraph L["OpenKikai"]
+    subgraph L["OpenKikaiSan"]
       direction TB
       BI["Bypass Input"]
       SC["Screen Capture"]

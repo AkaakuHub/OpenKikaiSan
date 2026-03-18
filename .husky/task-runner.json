@@ -14,7 +14,7 @@
       "command": "dotnet",
       "args": [
         "build",
-        "OpenKikai.sln"
+        "OpenKikaiSan.sln"
       ]
     }
   ],

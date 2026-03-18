@@ -35,11 +35,11 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Restore
-        run: dotnet restore OpenKikai.sln
+        run: dotnet restore OpenKikaiSan.sln
 
       - name: Publish (self-contained)
         run: >-
-          dotnet publish .\OpenKikai.App\OpenKikai.App.csproj
+          dotnet publish .\OpenKikaiSan.App\OpenKikaiSan.App.csproj
           -c Release
           -r win-x64
           --self-contained true
@@ -51,7 +51,7 @@ jobs:
       - name: Remove PDBs
         shell: pwsh
         run: |
-          $publish = 'OpenKikai.App\bin\Release\net10.0-windows\win-x64\publish'
+          $publish = 'OpenKikaiSan.App\bin\Release\net10.0-windows\win-x64\publish'
           Get-ChildItem -Path $publish -Filter *.pdb -Recurse | Remove-Item -Force
 
       - name: Install Velopack CLI
@@ -68,10 +68,10 @@ jobs:
         shell: pwsh
         run: >-
           vpk pack
-          --packId OpenKikai
+          --packId OpenKikaiSan
           --packVersion ${{ steps.version.outputs.value }}
           --packDir publish
-          --mainExe OpenKikai.App.exe
+          --mainExe OpenKikaiSan.App.exe
 
       - name: Upload Velopack release to GitHub
         shell: pwsh

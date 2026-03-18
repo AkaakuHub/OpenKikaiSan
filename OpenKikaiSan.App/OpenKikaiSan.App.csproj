@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <OutputType>WinExe</OutputType>
+        <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <UseWPF>true</UseWPF>
+        <ApplicationIcon>..\installer\icon\icon.ico</ApplicationIcon>
+        <StartupObject>OpenKikaiSan.App.App</StartupObject>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="OpenXR.Loader" Version="1.0.10.2" />
+        <PackageReference Include="Roslynator.Analyzers" Version="4.15.0" PrivateAssets="all" />
+        <PackageReference Include="Silk.NET.Direct3D11" Version="2.23.0" />
+        <PackageReference Include="Silk.NET.OpenXR" Version="2.23.0" />
+        <PackageReference Include="Velopack" Version="0.0.1298" />
+        <PackageReference Include="Vortice.MediaFoundation" Version="3.8.2" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ApplicationDefinition Remove="App.xaml" />
+        <Page Include="App.xaml" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <Content Include="$(NuGetPackageRoot)openxr.loader\1.0.10.2\native\x64\release\bin\openxr_loader.dll">
+            <Link>openxr_loader.dll</Link>
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
+    </ItemGroup>
+</Project>

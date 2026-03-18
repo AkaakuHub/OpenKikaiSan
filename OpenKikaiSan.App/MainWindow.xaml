@@ -1,0 +1,114 @@
+<Window
+  x:Class="OpenKikaiSan.App.MainWindow"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  Title="OpenKikaiSan"
+  Height="520"
+  Width="600"
+  MinHeight="300"
+  MinWidth="400"
+  WindowStartupLocation="CenterScreen"
+>
+  <Grid Margin="16">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <TextBlock
+      Grid.Row="0"
+      Text="OpenKikaiSan Desktop Application Template"
+      FontSize="18"
+      FontWeight="SemiBold"
+      Margin="0,0,0,16"
+    />
+
+    <ScrollViewer
+      Grid.Row="1"
+      VerticalScrollBarVisibility="Auto"
+      HorizontalScrollBarVisibility="Disabled"
+      Margin="0,0,0,16"
+    >
+      <StackPanel>
+        <TextBlock Text="Settings:" FontWeight="SemiBold" Margin="0,0,0,8" />
+        <TextBlock Text="OpenXR input monitor mode" Foreground="Gray" Margin="0,0,0,4" />
+        <CheckBox
+          Content="Enable keyboard debug input"
+          IsChecked="{Binding IsKeyboardDebugMode}"
+          Margin="0,0,0,8"
+        />
+        <TextBlock Text="Windows input TCP port" Foreground="Gray" Margin="0,0,0,4" />
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+          <TextBox
+            Width="120"
+            Text="{Binding WindowsInputTcpPort, UpdateSourceTrigger=PropertyChanged}"
+            Margin="0,0,8,0"
+          />
+          <Button
+            Content="Save Input TCP Port"
+            Width="170"
+            Command="{Binding ApplyInputTcpPortCommand}"
+          />
+        </StackPanel>
+        <Button
+          Content="Reinitialize OpenXR"
+          Width="180"
+          Command="{Binding ReinitializeOpenXrCommand}"
+          Margin="0,0,0,8"
+        />
+        <TextBlock Text="Capture target" Foreground="Gray" Margin="0,0,0,4" />
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+          <Button
+            Content="Select Window / Monitor"
+            Width="180"
+            Command="{Binding SelectCaptureTargetCommand}"
+            Margin="0,0,8,0"
+          />
+          <TextBlock
+            VerticalAlignment="Center"
+            Text="{Binding CaptureStatus}"
+            TextWrapping="Wrap"
+          />
+        </StackPanel>
+        <TextBlock
+          Foreground="Gray"
+          TextWrapping="Wrap"
+          Text="Left stick: WASD | Right stick: IJKL | Buttons: 1(X) 2(Y) 3(A) 4(B) | Trigger/Grip: Q E U O | Stick click: LeftShift RightShift | HMD yaw/pitch/roll: Arrow + PageUp/PageDown | HMD position: F/H(X) T/G(Y) R/V(Z)"
+        />
+
+        <TextBlock Text="OpenXR Controller Input:" FontWeight="SemiBold" Margin="0,16,0,8" />
+        <Border BorderBrush="#DDDDDD" BorderThickness="1" Padding="8">
+          <StackPanel>
+            <TextBlock Text="{Binding OpenXrInputStatus}" Margin="0,0,0,8" />
+            <TextBlock Text="{Binding ActiveInputSource}" Margin="0,0,0,8" />
+            <TextBlock Text="{Binding BridgeStatus}" Margin="0,0,0,8" />
+            <TextBlock Text="{Binding VideoStatus}" Margin="0,0,0,8" TextWrapping="Wrap" />
+            <TextBlock
+              Text="{Binding VideoRenderConfigStatus}"
+              Margin="0,0,0,8"
+              TextWrapping="Wrap"
+            />
+            <TextBlock
+              Text="{Binding VideoRenderErrorStatus}"
+              Margin="0,0,0,8"
+              TextWrapping="Wrap"
+              Foreground="OrangeRed"
+            />
+            <TextBlock Text="{Binding HmdPoseState}" TextWrapping="Wrap" Margin="0,0,0,8" />
+            <TextBlock Text="{Binding LeftControllerState}" Margin="0,0,0,4" />
+            <TextBlock Text="{Binding RightControllerState}" TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </ScrollViewer>
+
+    <TextBlock
+      Grid.Row="2"
+      HorizontalAlignment="Right"
+      VerticalAlignment="Center"
+      Text="{Binding StatusMessage}"
+      Foreground="Gray"
+    />
+  </Grid>
+</Window>

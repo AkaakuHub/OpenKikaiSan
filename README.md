@@ -2,7 +2,7 @@
 
 [日本語READMEはこちら](./docs/ja/README.md)
 
-# OpenKikai
+# OpenKikaiSan
 
 The client for OpenKikai System.
 
@@ -21,7 +21,7 @@ flowchart LR
       LK["Game"]
     end
 
-    subgraph L["OpenKikai"]
+    subgraph L["OpenKikaiSan"]
       direction TB
       BI["Bypass Input"]
       SC["Screen Capture"]
