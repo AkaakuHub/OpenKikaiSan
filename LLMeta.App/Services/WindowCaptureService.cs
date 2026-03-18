@@ -52,6 +52,7 @@ public sealed class WindowCaptureService : IDisposable
     }
 
     public event Action<DecodedVideoFrame>? FrameCaptured;
+    public event Action? CaptureStopped;
 
     public void SetD3D11DevicePointer(nint d3d11DevicePointer)
     {
@@ -99,11 +100,18 @@ public sealed class WindowCaptureService : IDisposable
 
     public void StopCapture()
     {
+        var notifyStopped = false;
         lock (_lock)
         {
+            notifyStopped = _captureItem is not null || _captureSession is not null;
             DisposeCaptureObjects();
             _captureItem = null;
             _statusText = "Capture: stopped";
+        }
+
+        if (notifyStopped)
+        {
+            CaptureStopped?.Invoke();
         }
     }
 
@@ -152,11 +160,18 @@ public sealed class WindowCaptureService : IDisposable
 
     private void OnCaptureItemClosed(GraphicsCaptureItem sender, object args)
     {
+        var notifyStopped = false;
         lock (_lock)
         {
+            notifyStopped = _captureItem is not null || _captureSession is not null;
             DisposeCaptureObjects();
             _captureItem = null;
             _statusText = "Capture: target closed";
+        }
+
+        if (notifyStopped)
+        {
+            CaptureStopped?.Invoke();
         }
     }
 

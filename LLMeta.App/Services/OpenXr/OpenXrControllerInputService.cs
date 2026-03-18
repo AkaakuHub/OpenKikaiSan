@@ -62,6 +62,11 @@ public sealed unsafe partial class OpenXrControllerInputService : IDisposable
         UpdateLatestSbsFrame(frame);
     }
 
+    public void ClearLatestDecodedSbsFrame()
+    {
+        ReleaseLatestVideoTexture();
+    }
+
     public OpenXrVideoRenderConfigState GetVideoRenderConfigStateSnapshot()
     {
         lock (_videoFrameLock)

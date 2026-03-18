@@ -211,6 +211,11 @@ public partial class App : System.Windows.Application
             {
                 _openXrControllerInputService?.SetLatestDecodedSbsFrame(frame);
             };
+            _windowCaptureService.CaptureStopped += () =>
+            {
+                _openXrControllerInputService?.ClearLatestDecodedSbsFrame();
+                ResetVideoPipelineMetrics();
+            };
             mainViewModel.BridgeStatus =
                 (_windowsInputTcpServerService?.StatusText ?? "Input TCP: not started")
                 + EmulatorRouteHint;
